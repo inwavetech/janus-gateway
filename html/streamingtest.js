@@ -71,6 +71,9 @@ $(document).ready(function() {
 			janus = new Janus(
 				{
 					server: server,
+					mqtt_topic: "v1/store/613/device_idx/138",
+					mqtt_username : "523",
+					mqtt_password : "0047ece3-ad95-4608-b732-f5acaba09632",
 					success: function() {
 						// Attach to Streaming plugin
 						janus.attach(

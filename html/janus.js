@@ -458,6 +458,9 @@ function Janus(gatewayCallbacks) {
 	var servers = null;
 	var serversIndex = 0;
 	var server = gatewayCallbacks.server;
+	var mqtt_topic = gatewayCallbacks.mqtt_topic;
+	var mqtt_username = gatewayCallbacks.mqtt_username;
+	var mqtt_password = gatewayCallbacks.mqtt_password;
 	if(Janus.isArray(server)) {
 		Janus.log("Multiple servers provided (" + server.length + "), will use the first that works");
 		server = null;
@@ -845,7 +848,7 @@ function Janus(gatewayCallbacks) {
 			request["apisecret"] = apisecret;
 		
 		var message = new Paho.MQTT.Message(JSON.stringify(request));
-		message.destinationName = "v1/store/613/device_idx/138/janus/to";
+		message.destinationName = mqtt_topic + "/janus/to";
 		message.qos = 0;
 		
 		mqtt.send(message);	
@@ -871,7 +874,12 @@ function Janus(gatewayCallbacks) {
 				}
 			}
 			if(wsmqtt) {
+				ws.onConnectionLost  = function() {};
 				
+				if(mqttKeepaliveTimeoutId) {
+					clearTimeout(mqttKeepaliveTimeoutId);
+					mqttKeepaliveTimeoutId = null;
+				}
 			}
 		}
 		if(token)
@@ -966,9 +974,7 @@ function Janus(gatewayCallbacks) {
 				onSuccess : function onMQTTConnect() {
 					Janus.log("MQTT Connected");
 					
-					mqtt.subscribe("v1/store/613/device_idx/138/janus/from");
-					//mqtt.subscribe("v1/store/613/device_mac/dca6324ac8a8/janus");
-					//mqtt.subscribe("v1/store/613/device_pos/1/janus");
+					mqtt.subscribe(mqtt_topic + "/janus/from");
 					
 					// We need to be notified about the success
 					transactions[transaction] = function(json) {
@@ -991,7 +997,7 @@ function Janus(gatewayCallbacks) {
 					};
 					
 					var message = new Paho.MQTT.Message(JSON.stringify(request));
-					message.destinationName = "v1/store/613/device_idx/138/janus/to";
+					message.destinationName = mqtt_topic + "/janus/to";
 					message.qos = 0;
 					
 					mqtt.send(message);
@@ -1015,12 +1021,21 @@ function Janus(gatewayCallbacks) {
 					callbacks.error("Error connecting to the Janus WebSockets server: Is the server down?");
 				},
 				useSSL: s[0] == 'mqtts' ? true : false,
-				"userName" : "523",
-				"password" : "0047ece3-ad95-4608-b732-f5acaba09632"
+				"userName" : mqtt_username,
+				"password" : mqtt_password
 			};
 			mqtt.onMessageArrived = function onMQTTMessageArrived(msg) {
 				handleEvent(JSON.parse(msg.payloadString));
 				console.log(msg);
+			};
+			
+			mqtt.onConnectionLost = function (responseObject) {
+				if (!server || !connected) {
+					return;
+				}
+				connected = false;
+				// FIXME What if this is called when the page is closed?
+				gatewayCallbacks.error("Lost connection to the server (is it down?)");
 			};
 			
 			mqtt.connect(options);
@@ -1113,7 +1128,7 @@ function Janus(gatewayCallbacks) {
 			}
 			
 			var message = new Paho.MQTT.Message(JSON.stringify(request));
-			message.destinationName = "v1/store/613/device_idx/138/janus/to";
+			message.destinationName = mqtt_topic + "/janus/to";
 			message.qos = 0;
 			
 			mqtt.send(message);
@@ -1184,6 +1199,7 @@ function Janus(gatewayCallbacks) {
 				ws.close();
 				ws = null;
 			}else if(wsmqtt) {
+				mqtt.onConnectionLost   = function() {};
 				mqtt.disconnect();
 				mqtt = null;
 			} else {
@@ -1242,17 +1258,47 @@ function Janus(gatewayCallbacks) {
 		if(wsmqtt) {
 			request["session_id"] = sessionId;
 
-			if (mqtt.connected === 1) {
-				var message = new Paho.MQTT.Message(JSON.stringify(request));
-				message.destinationName = "v1/store/613/device_idx/138/janus/to";
-				message.qos = 0;
-				
-				mqtt.send(message);				
-			} else {
+			var unbindMQTT = function() {
+				mqtt.onConnectionLost = function() {};;
+				mqtt.onMessageArrived = function() {};
+				//ws.removeEventListener('error', onUnbidMQTTError);
 				if(mqttKeepaliveTimeoutId) {
 					clearTimeout(mqttKeepaliveTimeoutId);
 				}
 				mqtt.disconnect();
+			};
+			
+			var onUnbindMQTTMessage = function(msg){
+				console.log(msg);
+				var data = JSON.parse(msg.payloadString);
+				if(data.session_id == request.session_id && data.transaction == request.transaction) {
+					unbindMQTT();
+					callbacks.success();
+					if(notifyDestroyed)
+						gatewayCallbacks.destroyed();
+				}
+			};
+			var onUnbindMQTTError = function(event) {
+				unbindMQTT();
+				callbacks.error("Failed to destroy the server: Is the server down?");
+				if(notifyDestroyed)
+					gatewayCallbacks.destroyed();
+			};
+
+
+			mqtt.onMessageArrived = onUnbindMQTTMessage;
+			//ws.addEventListener('error', onUnbindMQTTError);			
+
+			if (mqtt.isConnected()) {
+				console.log("mqtt connected");
+				var message = new Paho.MQTT.Message(JSON.stringify(request));
+				message.destinationName = mqtt_topic + "/janus/to";
+				message.qos = 0;
+				
+				mqtt.send(message);				
+			} else {
+				console.log("mqtt error");
+				onUnbindMQTTError();
 			}
 			
 			return;
@@ -1485,7 +1531,7 @@ function Janus(gatewayCallbacks) {
 			request["session_id"] = sessionId;
 			
 			var message = new Paho.MQTT.Message(JSON.stringify(request));
-			message.destinationName = "v1/store/613/device_idx/138/janus/to";
+			message.destinationName = mqtt_topic + "/janus/to";
 			message.qos = 0;
 			
 			mqtt.send(message);			
@@ -1689,7 +1735,7 @@ function Janus(gatewayCallbacks) {
 			};			
 			
 			var message = new Paho.MQTT.Message(JSON.stringify(request));
-			message.destinationName = "v1/store/613/device_idx/138/janus/to";
+			message.destinationName = mqtt_topic + "/janus/to";
 			message.qos = 0;
 			
 			mqtt.send(message);			
@@ -1765,7 +1811,7 @@ function Janus(gatewayCallbacks) {
 			request["handle_id"] = handleId;
 			
 			var message = new Paho.MQTT.Message(JSON.stringify(request));
-			message.destinationName = "v1/store/613/device_idx/138/janus/to";
+			message.destinationName = mqtt_topic + "/janus/to";
 			message.qos = 0;
 			
 			mqtt.send(message);		
@@ -1985,7 +2031,7 @@ function Janus(gatewayCallbacks) {
 			request["handle_id"] = handleId;
 			
 			var message = new Paho.MQTT.Message(JSON.stringify(request));
-			message.destinationName = "v1/store/613/device_idx/138/janus/to";
+			message.destinationName = mqtt_topic + "/janus/to";
 			message.qos = 0;
 			
 			mqtt.send(message);	
@@ -3591,7 +3637,7 @@ function Janus(gatewayCallbacks) {
 						request["handle_id"] = handleId;
 						
 						var message = new Paho.MQTT.Message(JSON.stringify(request));
-						message.destinationName = "v1/store/613/device_idx/138/janus/to";
+						message.destinationName = mqtt_topic + "/janus/to";
 						message.qos = 0;
 						
 						mqtt.send(message);							
