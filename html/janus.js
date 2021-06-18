@@ -598,6 +598,15 @@ function Janus(gatewayCallbacks) {
 	// Private event handler: this will trigger plugin callbacks, if set
 	function handleEvent(json, skipTimeout) {
 		retries = 0;
+		
+		if(sessionId !== undefined && sessionId !== null) {
+			if(json["session_id"] !== undefined) {
+				if(json["session_id"] != sessionId) {
+					return;
+				}
+			}
+		}
+		
 		if(!websockets && !wsmqtt && sessionId !== undefined && sessionId !== null && skipTimeout !== true)
 			eventHandler();
 		if(!websockets && !wsmqtt && Janus.isArray(json)) {
@@ -852,6 +861,8 @@ function Janus(gatewayCallbacks) {
 		message.qos = 0;
 		
 		mqtt.send(message);	
+		
+		console.log(JSON.stringify(request));
 	}
 
 	// Private method to create a session
@@ -1026,7 +1037,7 @@ function Janus(gatewayCallbacks) {
 			};
 			mqtt.onMessageArrived = function onMQTTMessageArrived(msg) {
 				handleEvent(JSON.parse(msg.payloadString));
-				console.log(msg);
+				console.log(msg.payloadString);
 			};
 			
 			mqtt.onConnectionLost = function (responseObject) {
