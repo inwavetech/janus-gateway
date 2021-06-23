@@ -455,6 +455,7 @@ function Janus(gatewayCallbacks) {
 	var wsHandlers = {};
 	var wsKeepaliveTimeoutId = null;
 	var mqttKeepaliveTimeoutId = null;
+	var mqttTimeoutId = null;
 	var servers = null;
 	var serversIndex = 0;
 	var server = gatewayCallbacks.server;
@@ -512,6 +513,14 @@ function Janus(gatewayCallbacks) {
 		keepAlivePeriod = gatewayCallbacks.keepAlivePeriod;
 	if(isNaN(keepAlivePeriod))
 		keepAlivePeriod = 25000;
+	
+	// Some timeout values
+	var requestResponseTimeout = 5000;
+	if(gatewayCallbacks.requestResponseTimeout !== undefined && gatewayCallbacks.requestResponseTimeout !== null)
+		requestResponseTimeout = gatewayCallbacks.requestResponseTimeout;
+	if(isNaN(keepAlivePeriod))
+		requestResponseTimeout = 5000;
+	
 	var longPollTimeout = 60000;
 	if(gatewayCallbacks.longPollTimeout !== undefined && gatewayCallbacks.longPollTimeout !== null)
 		longPollTimeout = gatewayCallbacks.longPollTimeout;
@@ -860,9 +869,24 @@ function Janus(gatewayCallbacks) {
 		message.destinationName = mqtt_topic + "/janus/to";
 		message.qos = 0;
 		
+		if(mqttTimeoutId) {
+			clearTimeout(mqttTimeoutId);
+		}
+		mqttTimeoutId = setTimeout(requestResponseTimeoutMQTT, requestResponseTimeout);					
 		mqtt.send(message);	
 		
 		console.log(JSON.stringify(request));
+	}
+	
+	function requestResponseTimeoutMQTT() {
+		if(!server || !wsmqtt)
+			return;
+		
+		gatewayCallbacks.error("Timeout server. Lost connection to the device or feature is unsupported (is it down?)");
+
+		if (wsmqtt) {
+			mqtt.disconnect();
+		}
 	}
 
 	// Private method to create a session
@@ -1011,7 +1035,12 @@ function Janus(gatewayCallbacks) {
 					message.destinationName = mqtt_topic + "/janus/to";
 					message.qos = 0;
 					
+					if(mqttTimeoutId) {
+						clearTimeout(mqttTimeoutId);
+					}
+					mqttTimeoutId = setTimeout(requestResponseTimeoutMQTT, requestResponseTimeout);					
 					mqtt.send(message);
+
 				},
 				onFailure : function onMQTTFailure() {
 					Janus.error("Error connecting to the Janus WebSockets server... " + server);
@@ -1019,7 +1048,7 @@ function Janus(gatewayCallbacks) {
 						serversIndex++;
 						if (serversIndex === servers.length) {
 							// We tried all the servers the user gave us and they all failed
-							callbacks.error("Error connecting to any of the provided Janus servers: Is the server down?");
+							callbacks.error("Error connecting to any of the provided Janus servers: Is the server down or feature is unsupported?");
 							return;
 						}
 						// Let's try the next server
@@ -1029,13 +1058,17 @@ function Janus(gatewayCallbacks) {
 						}, 200);
 						return;
 					}
-					callbacks.error("Error connecting to the Janus WebSockets server: Is the server down?");
+					callbacks.error("Error connecting to the Janus WebSockets server: Is the server down or feature is unsupported?");
 				},
 				useSSL: s[0] == 'mqtts' ? true : false,
 				"userName" : mqtt_username,
 				"password" : mqtt_password
 			};
 			mqtt.onMessageArrived = function onMQTTMessageArrived(msg) {
+				if(mqttTimeoutId) {
+					clearTimeout(mqttTimeoutId);
+				}
+				
 				handleEvent(JSON.parse(msg.payloadString));
 				console.log(msg.payloadString);
 			};
@@ -1142,6 +1175,10 @@ function Janus(gatewayCallbacks) {
 			message.destinationName = mqtt_topic + "/janus/to";
 			message.qos = 0;
 			
+			if(mqttTimeoutId) {
+				clearTimeout(mqttTimeoutId);
+			}
+			mqttTimeoutId = setTimeout(requestResponseTimeoutMQTT, requestResponseTimeout);					
 			mqtt.send(message);
 			return;
 		}
@@ -1306,6 +1343,10 @@ function Janus(gatewayCallbacks) {
 				message.destinationName = mqtt_topic + "/janus/to";
 				message.qos = 0;
 				
+				/*if(mqttTimeoutId) {
+					clearTimeout(mqttTimeoutId);
+				}
+				mqttTimeoutId = setTimeout(requestResponseTimeoutMQTT, requestResponseTimeout);*/						
 				mqtt.send(message);				
 			} else {
 				console.log("mqtt error");
@@ -1545,6 +1586,10 @@ function Janus(gatewayCallbacks) {
 			message.destinationName = mqtt_topic + "/janus/to";
 			message.qos = 0;
 			
+			if(mqttTimeoutId) {
+				clearTimeout(mqttTimeoutId);
+			}
+			mqttTimeoutId = setTimeout(requestResponseTimeoutMQTT, requestResponseTimeout);					
 			mqtt.send(message);			
 			return;
 		}
@@ -1749,6 +1794,10 @@ function Janus(gatewayCallbacks) {
 			message.destinationName = mqtt_topic + "/janus/to";
 			message.qos = 0;
 			
+			if(mqttTimeoutId) {
+				clearTimeout(mqttTimeoutId);
+			}
+			mqttTimeoutId = setTimeout(requestResponseTimeoutMQTT, requestResponseTimeout);					
 			mqtt.send(message);			
 			return;
 		}
@@ -1825,6 +1874,10 @@ function Janus(gatewayCallbacks) {
 			message.destinationName = mqtt_topic + "/janus/to";
 			message.qos = 0;
 			
+			if(mqttTimeoutId) {
+				clearTimeout(mqttTimeoutId);
+			}
+			mqttTimeoutId = setTimeout(requestResponseTimeoutMQTT, requestResponseTimeout);					
 			mqtt.send(message);		
 			return;
 		}
@@ -2045,6 +2098,10 @@ function Janus(gatewayCallbacks) {
 			message.destinationName = mqtt_topic + "/janus/to";
 			message.qos = 0;
 			
+			if(mqttTimeoutId) {
+				clearTimeout(mqttTimeoutId);
+			}
+			mqttTimeoutId = setTimeout(requestResponseTimeoutMQTT, requestResponseTimeout);					
 			mqtt.send(message);	
 			
 			delete pluginHandles[handleId];
@@ -3651,6 +3708,11 @@ function Janus(gatewayCallbacks) {
 						message.destinationName = mqtt_topic + "/janus/to";
 						message.qos = 0;
 						
+						
+						if(mqttTimeoutId) {
+							clearTimeout(mqttTimeoutId);
+						}
+						mqttTimeoutId = setTimeout(requestResponseTimeoutMQTT, requestResponseTimeout);					
 						mqtt.send(message);							
 					}else{
 						Janus.httpAPICall(server + "/" + sessionId + "/" + handleId, {
