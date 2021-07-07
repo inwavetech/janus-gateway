@@ -435,6 +435,7 @@ function Janus(gatewayCallbacks) {
 	gatewayCallbacks.success = (typeof gatewayCallbacks.success == "function") ? gatewayCallbacks.success : Janus.noop;
 	gatewayCallbacks.error = (typeof gatewayCallbacks.error == "function") ? gatewayCallbacks.error : Janus.noop;
 	gatewayCallbacks.destroyed = (typeof gatewayCallbacks.destroyed == "function") ? gatewayCallbacks.destroyed : Janus.noop;
+	gatewayCallbacks.handleMQTTMessage= (typeof gatewayCallbacks.handleMQTTMessage == "function") ? gatewayCallbacks.handleMQTTMessage : Janus.noop;
 	if(!Janus.initDone) {
 		gatewayCallbacks.error("Library not initialized");
 		return {};
@@ -480,6 +481,7 @@ function Janus(gatewayCallbacks) {
 			}
 		}
 	}
+
 	var iceServers = gatewayCallbacks.iceServers || [{urls: "stun:stun.easi.live:3478"}];
 	var iceTransportPolicy = gatewayCallbacks.iceTransportPolicy;
 	var bundlePolicy = gatewayCallbacks.bundlePolicy;
@@ -557,6 +559,7 @@ function Janus(gatewayCallbacks) {
 
 	// Public methods
 	this.getServer = function() { return server; };
+        this.getMQTT = function() { return mqtt; };
 	this.isConnected = function() { return connected; };
 	this.reconnect = function(callbacks) {
 		callbacks = callbacks || {};
@@ -606,7 +609,7 @@ function Janus(gatewayCallbacks) {
 
 	// Private event handler: this will trigger plugin callbacks, if set
 	function handleEvent(json, skipTimeout) {
-		retries = 0;
+                retries = 0;
 		
 		if(sessionId !== undefined && sessionId !== null) {
 			if(json["session_id"] !== undefined) {
@@ -1069,6 +1072,14 @@ function Janus(gatewayCallbacks) {
 					clearTimeout(mqttTimeoutId);
 				}
 				
+		                if(gatewayCallbacks.handleMQTTMessage && gatewayCallbacks.handleMQTTMessage !== Janus.noop) {
+                                        if(gatewayCallbacks.handleMQTTMessage(msg) === false) {
+                                                 console.log(msg.payloadString);
+                                                 return;
+                                        }
+                                }
+
+
 				handleEvent(JSON.parse(msg.payloadString));
 				console.log(msg.payloadString);
 			};
