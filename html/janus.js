@@ -1349,15 +1349,14 @@ function Janus(gatewayCallbacks) {
 			//ws.addEventListener('error', onUnbindMQTTError);			
 
 			if (mqtt.isConnected()) {
-				console.log("mqtt connected");
 				var message = new Paho.MQTT.Message(JSON.stringify(request));
 				message.destinationName = mqtt_topic + "/janus/to";
 				message.qos = 0;
 				
-				/*if(mqttTimeoutId) {
+				if(mqttTimeoutId) {
 					clearTimeout(mqttTimeoutId);
 				}
-				mqttTimeoutId = setTimeout(requestResponseTimeoutMQTT, requestResponseTimeout);*/						
+				//mqttTimeoutId = setTimeout(requestResponseTimeoutMQTT, requestResponseTimeout);*/						
 				mqtt.send(message);				
 			} else {
 				console.log("mqtt error");
