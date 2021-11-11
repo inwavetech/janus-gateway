@@ -332,7 +332,8 @@ post = <optional backend to contact via HTTP post for all incoming messages>
 	"room" : <unique numeric ID of the room to join>,
 	"pin" : "<pin to join the room; mandatory if configured>",
 	"username" : "<unique username to have in the room; mandatory>",
-	"display" : "<display name to use in the room; optional>"
+	"display" : "<display name to use in the room; optional>",
+	"token" : "<invitation token, in case the room has an ACL; optional>",
 }
 \endverbatim
  *
@@ -632,6 +633,7 @@ static struct janus_json_parameter kick_parameters[] = {
 static struct janus_json_parameter join_parameters[] = {
 	{"username", JSON_STRING, JANUS_JSON_PARAM_REQUIRED},
 	{"pin", JSON_STRING, 0},
+	{"token", JSON_STRING, 0},
 	{"display", JSON_STRING, 0}
 };
 static struct janus_json_parameter message_parameters[] = {
@@ -1221,6 +1223,7 @@ struct janus_plugin_result *janus_textroom_handle_message(janus_plugin_session *
 			|| !strcasecmp(request_text, "create")
 			|| !strcasecmp(request_text, "edit")
 			|| !strcasecmp(request_text, "announcement")
+			|| !strcasecmp(request_text, "allowed")
 			|| !strcasecmp(request_text, "kick")
 			|| !strcasecmp(request_text, "destroy")) {
 		/* These requests typically only belong to the datachannel
@@ -1302,6 +1305,7 @@ json_t *janus_textroom_handle_admin_message(json_t *message) {
 			|| !strcasecmp(request_text, "create")
 			|| !strcasecmp(request_text, "edit")
 			|| !strcasecmp(request_text, "announcement")
+			|| !strcasecmp(request_text, "allowed")
 			|| !strcasecmp(request_text, "kick")
 			|| !strcasecmp(request_text, "destroy")) {
 		if(json_object_get(message, "textroom") == NULL)
@@ -1516,6 +1520,14 @@ janus_plugin_result *janus_textroom_handle_incoming_request(janus_plugin_session
 			json_object_set_new(msg, "whisper", json_true());
 		char *msg_text = json_dumps(msg, json_format);
 		json_decref(msg);
+		if(msg_text == NULL) {
+			janus_mutex_unlock(&textroom->mutex);
+			janus_refcount_decrease(&textroom->ref);
+			JANUS_LOG(LOG_ERR, "Failed to stringify message...\n");
+			error_code = JANUS_TEXTROOM_ERROR_UNKNOWN_ERROR;
+			g_snprintf(error_cause, 512, "Failed to stringify message");
+			goto msg_response;
+		}
 		/* Start preparing the response too */
 		reply = json_object();
 		json_object_set_new(reply, "textroom", json_string("success"));
@@ -1688,6 +1700,20 @@ janus_plugin_result *janus_textroom_handle_incoming_request(janus_plugin_session
 			g_snprintf(error_cause, 512, "Username already taken");
 			goto msg_response;
 		}
+		/* A token might be required too */
+		if(textroom->check_tokens) {
+			json_t *token = json_object_get(root, "token");
+			const char *token_text = token ? json_string_value(token) : NULL;
+			if(token_text == NULL || g_hash_table_lookup(textroom->allowed, token_text) == NULL) {
+				janus_mutex_unlock(&session->mutex);
+				janus_mutex_unlock(&textroom->mutex);
+				janus_refcount_decrease(&textroom->ref);
+				JANUS_LOG(LOG_ERR, "Unauthorized (not in the allowed list)\n");
+				error_code = JANUS_TEXTROOM_ERROR_UNAUTHORIZED;
+				g_snprintf(error_cause, 512, "Unauthorized (not in the allowed list)");
+				goto msg_response;
+			}
+		}
 		json_t *display = json_object_get(root, "display");
 		const char *display_text = json_string_value(display);
 		/* Create a participant instance */
@@ -1718,6 +1744,15 @@ janus_plugin_result *janus_textroom_handle_incoming_request(janus_plugin_session
 				json_object_set_new(event, "display", json_string(display_text));
 			char *event_text = json_dumps(event, json_format);
 			json_decref(event);
+			if(event_text == NULL) {
+				janus_mutex_unlock(&session->mutex);
+				janus_mutex_unlock(&textroom->mutex);
+				janus_refcount_decrease(&textroom->ref);
+				JANUS_LOG(LOG_ERR, "Failed to stringify message...\n");
+				error_code = JANUS_TEXTROOM_ERROR_UNKNOWN_ERROR;
+				g_snprintf(error_cause, 512, "Failed to stringify message");
+				goto msg_response;
+			}
 			janus_plugin_data data = { .label = NULL, .protocol = NULL, .binary = FALSE, .buffer = event_text, .length = strlen(event_text) };
 			gateway->relay_data(handle, &data);
 			/* Broadcast */
@@ -1822,6 +1857,17 @@ janus_plugin_result *janus_textroom_handle_incoming_request(janus_plugin_session
 			json_object_set_new(event, "username", json_string(participant->username));
 			char *event_text = json_dumps(event, json_format);
 			json_decref(event);
+			if(event_text == NULL) {
+				janus_mutex_unlock(&session->mutex);
+				janus_mutex_unlock(&textroom->mutex);
+				janus_refcount_decrease(&textroom->ref);
+				janus_refcount_decrease(&participant->ref);
+				janus_textroom_participant_destroy(participant);
+				JANUS_LOG(LOG_ERR, "Failed to stringify message...\n");
+				error_code = JANUS_TEXTROOM_ERROR_UNKNOWN_ERROR;
+				g_snprintf(error_cause, 512, "Failed to stringify message");
+				goto msg_response;
+			}
 			janus_plugin_data data = { .label = NULL, .protocol = NULL, .binary = FALSE, .buffer = event_text, .length = strlen(event_text) };
 			gateway->relay_data(handle, &data);
 			/* Broadcast */
@@ -2151,6 +2197,14 @@ janus_plugin_result *janus_textroom_handle_incoming_request(janus_plugin_session
 			json_object_set_new(event, "username", json_string(participant->username));
 			char *event_text = json_dumps(event, json_format);
 			json_decref(event);
+			if(event_text == NULL) {
+				janus_mutex_unlock(&textroom->mutex);
+				janus_mutex_unlock(&rooms_mutex);
+				JANUS_LOG(LOG_ERR, "Failed to stringify message...\n");
+				error_code = JANUS_TEXTROOM_ERROR_UNKNOWN_ERROR;
+				g_snprintf(error_cause, 512, "Failed to stringify message");
+				goto msg_response;
+			}
 			/* Broadcast */
 			GHashTableIter iter;
 			gpointer value;
@@ -2251,6 +2305,14 @@ janus_plugin_result *janus_textroom_handle_incoming_request(janus_plugin_session
 		json_object_set_new(msg, "text", json_string(message));
 		char *msg_text = json_dumps(msg, json_format);
 		json_decref(msg);
+		if(msg_text == NULL) {
+			janus_mutex_unlock(&textroom->mutex);
+			janus_refcount_decrease(&textroom->ref);
+			JANUS_LOG(LOG_ERR, "Failed to stringify message...\n");
+			error_code = JANUS_TEXTROOM_ERROR_UNKNOWN_ERROR;
+			g_snprintf(error_cause, 512, "Failed to stringify message");
+			goto msg_response;
+		}
 		/* Send the announcement to everybody in the room */
 		if(textroom->participants) {
 			GHashTableIter iter;
@@ -2756,6 +2818,15 @@ janus_plugin_result *janus_textroom_handle_incoming_request(janus_plugin_session
 			json_object_set_new(event, "room", string_ids ? json_string(textroom->room_id_str) : json_integer(textroom->room_id));
 			char *event_text = json_dumps(event, json_format);
 			json_decref(event);
+			if(event_text == NULL) {
+				janus_mutex_unlock(&textroom->mutex);
+				janus_mutex_unlock(&rooms_mutex);
+				janus_refcount_decrease(&textroom->ref);
+				JANUS_LOG(LOG_ERR, "Failed to stringify message...\n");
+				error_code = JANUS_TEXTROOM_ERROR_UNKNOWN_ERROR;
+				g_snprintf(error_cause, 512, "Failed to stringify message");
+				goto msg_response;
+			}
 			janus_plugin_data data = { .label = NULL, .protocol = NULL, .binary = FALSE, .buffer = event_text, .length = strlen(event_text) };
 			gateway->relay_data(handle, &data);
 			/* Broadcast */
@@ -2821,9 +2892,13 @@ msg_response:
 					/* Reply via data channels */
 					char *reply_text = json_dumps(reply, json_format);
 					json_decref(reply);
-					janus_plugin_data data = { .label = NULL, .protocol = NULL, .binary = FALSE, .buffer = reply_text, .length = strlen(reply_text) };
-					gateway->relay_data(handle, &data);
-					free(reply_text);
+					if(reply_text == NULL) {
+						JANUS_LOG(LOG_ERR, "Failed to stringify message...\n");
+					} else {
+						janus_plugin_data data = { .label = NULL, .protocol = NULL, .binary = FALSE, .buffer = reply_text, .length = strlen(reply_text) };
+						gateway->relay_data(handle, &data);
+						free(reply_text);
+					}
 				} else {
 					/* Reply via Janus API */
 					return janus_plugin_result_new(JANUS_PLUGIN_OK, NULL, reply);

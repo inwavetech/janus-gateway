@@ -640,11 +640,11 @@ int janus_sdp_process(void *ice_handle, janus_sdp *remote_sdp, gboolean rids_hml
 						stream->video_ssrc_rtx = janus_random_uint32();	/* FIXME Should we look for conflicts? */
 				}
 			}
-			if(stream->video_ssrc_peer[1] && stream->video_rtcp_ctx[1] == NULL) {
+			if((stream->video_ssrc_peer[1] || stream->rid[1] != NULL) && stream->video_rtcp_ctx[1] == NULL) {
 				stream->video_rtcp_ctx[1] = g_malloc0(sizeof(rtcp_context));
 				stream->video_rtcp_ctx[1]->tb = 90000;
 			}
-			if(stream->video_ssrc_peer[2] && stream->video_rtcp_ctx[2] == NULL) {
+			if((stream->video_ssrc_peer[2] || stream->rid[rids_hml ? 2 : 0] != NULL) && stream->video_rtcp_ctx[2] == NULL) {
 				stream->video_rtcp_ctx[2] = g_malloc0(sizeof(rtcp_context));
 				stream->video_rtcp_ctx[2]->tb = 90000;
 			}
@@ -1182,7 +1182,8 @@ int janus_sdp_anonymize(janus_sdp *anon) {
 		GList *purged_ptypes = NULL;
 		while(tempA) {
 			janus_sdp_attribute *a = (janus_sdp_attribute *)tempA->data;
-			if(a->value && (strstr(a->value, "red/90000") || strstr(a->value, "ulpfec/90000") || strstr(a->value, "rtx/90000"))) {
+			if(a->value && (strstr(a->value, "red/90000") || strstr(a->value, "ulpfec/90000") ||
+					strstr(a->value, "flexfec-03/90000") || strstr(a->value, "rtx/90000"))) {
 				int ptype = atoi(a->value);
 				if(ptype < 0) {
 					JANUS_LOG(LOG_ERR, "Invalid payload type (%d)\n", ptype);
@@ -1260,14 +1261,14 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 			if(audio == 1 && m->port > 0) {
 				g_snprintf(buffer_part, sizeof(buffer_part),
 					" %s", handle->audio_mid ? handle->audio_mid : "audio");
-				g_strlcat(buffer, buffer_part, sizeof(buffer));
+				janus_strlcat(buffer, buffer_part, sizeof(buffer));
 			}
 		} else if(m->type == JANUS_SDP_VIDEO) {
 			video++;
 			if(video == 1 && m->port > 0) {
 				g_snprintf(buffer_part, sizeof(buffer_part),
 					" %s", handle->video_mid ? handle->video_mid : "video");
-				g_strlcat(buffer, buffer_part, sizeof(buffer));
+				janus_strlcat(buffer, buffer_part, sizeof(buffer));
 			}
 #ifdef HAVE_SCTP
 		} else if(m->type == JANUS_SDP_APPLICATION) {
@@ -1276,7 +1277,7 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 			if(data == 1 && m->port > 0) {
 				g_snprintf(buffer_part, sizeof(buffer_part),
 					" %s", handle->data_mid ? handle->data_mid : "data");
-				g_strlcat(buffer, buffer_part, sizeof(buffer));
+				janus_strlcat(buffer, buffer_part, sizeof(buffer));
 			}
 #endif
 		}
@@ -1502,7 +1503,8 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 			m->attributes = g_list_append(m->attributes, a);
 			a = janus_sdp_attribute_create("ssrc", "%"SCNu32" label:janusv0", stream->video_ssrc);
 			m->attributes = g_list_append(m->attributes, a);
-			if(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX)) {
+			if(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX) &&
+					(m->direction == JANUS_SDP_DEFAULT || m->direction == JANUS_SDP_SENDRECV || m->direction == JANUS_SDP_SENDONLY)) {
 				/* Add rtx SSRC group to negotiate the RFC4588 stuff */
 				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:janus", stream->video_ssrc_rtx);
 				m->attributes = g_list_append(m->attributes, a);
@@ -1526,10 +1528,10 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 				a = janus_sdp_attribute_create("rid", "%s recv", stream->rid[index]);
 				m->attributes = g_list_append(m->attributes, a);
 				if(strlen(rids) == 0) {
-					g_strlcat(rids, stream->rid[index], sizeof(rids));
+					janus_strlcat(rids, stream->rid[index], sizeof(rids));
 				} else {
-					g_strlcat(rids, ";", sizeof(rids));
-					g_strlcat(rids, stream->rid[index], sizeof(rids));
+					janus_strlcat(rids, ";", sizeof(rids));
+					janus_strlcat(rids, stream->rid[index], sizeof(rids));
 				}
 			}
 			if(stream->legacy_rid) {

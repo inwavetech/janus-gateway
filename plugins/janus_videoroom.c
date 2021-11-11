@@ -67,7 +67,8 @@ room-<unique room ID>: {
 				can be a comma separated list in order of preference, e.g., vp9,vp8,h264)
 	vp9_profile = VP9-specific profile to prefer (e.g., "2" for "profile-id=2")
 	h264_profile = H.264-specific profile to prefer (e.g., "42e01f" for "profile-level-id=42e01f")
-	opus_fec = true|false (whether inband FEC must be negotiated; only works for Opus, default=false)
+	opus_fec = true|false (whether inband FEC must be negotiated; only works for Opus, default=true)
+	opus_dtx = true|false (whether DTX must be negotiated; only works for Opus, default=false)
 	video_svc = true|false (whether SVC support must be enabled; only works for VP9, default=false)
 	audiolevel_ext = true|false (whether the ssrc-audio-level RTP extension must be
 		negotiated/used or not for new publishers, default=true)
@@ -356,9 +357,9 @@ room-<unique room ID>: {
 }
 \endverbatim
  *
- * To get a list of the available rooms (excluded those configured or
- * created as private rooms) you can make use of the \c list request,
- * which has to be formatted as follows:
+ * To get a list of the available rooms you can make use of the \c list request.
+ * \c admin_key is optional. If included and correct, rooms configured/created
+ * as private will be included in the list as well.
  *
 \verbatim
 {
@@ -376,16 +377,30 @@ room-<unique room ID>: {
 			"room" : <unique numeric ID>,
 			"description" : "<Name of the room>",
 			"pin_required" : <true|false, whether a PIN is required to join this room>,
+			"is_private" : <true|false, whether this room is 'private' (as in hidden) or not>,
 			"max_publishers" : <how many publishers can actually publish via WebRTC at the same time>,
 			"bitrate" : <bitrate cap that should be forced (via REMB) on all publishers by default>,
-			"bitrate_cap" : <true|false, whether the above cap should act as a limit to dynamic bitrate changes by publishers>,
+			"bitrate_cap" : <true|false, whether the above cap should act as a limit to dynamic bitrate changes by publishers (optional)>,
 			"fir_freq" : <how often a keyframe request is sent via PLI/FIR to active publishers>,
+			"require_pvtid": <true|false, whether subscriptions in this room require a private_id>,
+			"require_e2ee": <true|false, whether end-to-end encrypted publishers are required>,
+			"notify_joining": <true|false, whether an event is sent to notify all participants if a new participant joins the room>,
 			"audiocodec" : "<comma separated list of allowed audio codecs>",
 			"videocodec" : "<comma separated list of allowed video codecs>",
+			"opus_fec": <true|false, whether inband FEC must be negotiated (note: only available for Opus) (optional)>,
+			"opus_dtx": <true|false, whether DTX must be negotiated (note: only available for Opus) (optional)>,
+			"video_svc": <true|false, whether SVC must be done for video (note: only available for VP9 right now) (optional)>,
 			"record" : <true|false, whether the room is being recorded>,
-			"record_dir" : "<if recording, the path where the .mjr files are being saved>",
+			"rec_dir" : "<if recording, the path where the .mjr files are being saved>",
 			"lock_record" : <true|false, whether the room recording state can only be changed providing the secret>,
 			"num_participants" : <count of the participants (publishers, active or not; not subscribers)>
+			"audiolevel_ext": <true|false, whether the ssrc-audio-level extension must be negotiated or not for new publishers>,
+			"audiolevel_event": <true|false, whether to emit event to other users about audiolevel>,
+			"audio_active_packets": <amount of packets with audio level for checkup (optional, only if audiolevel_event is true)>,
+			"audio_level_average": <average audio level (optional, only if audiolevel_event is true)>,
+			"videoorient_ext": <true|false, whether the video-orientation extension must be negotiated or not for new publishers>,
+			"playoutdelay_ext": <true|false, whether the playout-delay extension must be negotiated or not for new publishers>,
+			"transport_wide_cc_ext": <true|false, whether the transport wide cc extension must be negotiated or not for new publishers>
 		},
 		// Other rooms
 	]
@@ -480,6 +495,9 @@ room-<unique room ID>: {
 			"display" : "<display name of active publisher #1, if any>",
 			"audio_codec" : "<audio codec used by active publisher #1, if any>",
 			"video_codec" : "<video codec used by active publisher #1, if any>",
+			"audio_moderated" : <set to true if audio has been moderated for this participant>,
+			"video_moderated" : <set to true if video has been moderated for this participant>,
+			"data_moderated" : <set to true if data has been moderated for this participant>,
 			"simulcast" : "<true if the publisher uses simulcast (VP8 and H.264 only)>",
 			"talking" : <true|false, whether the publisher is talking or not (only if audio levels are used)>,
 		},
@@ -598,6 +616,9 @@ room-<unique room ID>: {
 			"display" : "<display name of the new publisher, if any>",
 			"audio_codec" : "<audio codec used the new publisher, if any>",
 			"video_codec" : "<video codec used by the new publisher, if any>",
+			"audio_moderated" : <set to true if audio has been moderated for this participant>,
+			"video_moderated" : <set to true if video has been moderated for this participant>,
+			"data_moderated" : <set to true if data has been moderated for this participant>,
 			"simulcast" : "<true if the publisher uses simulcast (VP8 and H.264 only)>",
 			"talking" : <true|false, whether the publisher is talking or not (only if audio levels are used)>,
 		}
@@ -1248,6 +1269,7 @@ static struct janus_json_parameter create_parameters[] = {
 	{"vp9_profile", JSON_STRING, 0},
 	{"h264_profile", JSON_STRING, 0},
 	{"opus_fec", JANUS_JSON_BOOL, 0},
+	{"opus_dtx", JANUS_JSON_BOOL, 0},
 	{"video_svc", JANUS_JSON_BOOL, 0},
 	{"audiolevel_ext", JANUS_JSON_BOOL, 0},
 	{"audiolevel_event", JANUS_JSON_BOOL, 0},
@@ -1472,6 +1494,7 @@ typedef struct janus_videoroom {
 	char *vp9_profile;			/* VP9 codec profile to prefer, if more are negotiated */
 	char *h264_profile;			/* H.264 codec profile to prefer, if more are negotiated */
 	gboolean do_opusfec;		/* Whether inband FEC must be negotiated (note: only available for Opus) */
+	gboolean do_opusdtx;		/* Whether DTX must be negotiated (note: only available for Opus) */
 	gboolean do_svc;			/* Whether SVC must be done for video (note: only available for VP9 right now) */
 	gboolean audiolevel_ext;	/* Whether the ssrc-audio-level extension must be negotiated or not for new publishers */
 	gboolean audiolevel_event;	/* Whether to emit event to other users about audiolevel */
@@ -1614,10 +1637,10 @@ typedef struct janus_videoroom_publisher {
 	guint32 audio_ssrc;		/* Audio SSRC of this publisher */
 	guint32 video_ssrc;		/* Video SSRC of this publisher */
 	gboolean do_opusfec;	/* Whether this publisher is sending inband Opus FEC */
+	gboolean do_opusdtx;	/* Whether this publisher is using Opus DTX (Discontinuous Transmission) */
 	uint32_t ssrc[3];		/* Only needed in case VP8 (or H.264) simulcasting is involved */
 	char *rid[3];			/* Only needed if simulcasting is rid-based */
 	int rid_extmap_id;		/* rid extmap ID */
-	int framemarking_ext_id;			/* Frame marking extmap ID */
 	guint8 audio_level_extmap_id;		/* Audio level extmap ID */
 	guint8 video_orient_extmap_id;		/* Video orientation extmap ID */
 	guint8 playout_delay_extmap_id;		/* Playout delay extmap ID */
@@ -1856,40 +1879,40 @@ static void janus_videoroom_codecstr(janus_videoroom *videoroom, char *audio_cod
 		audio_codecs[0] = 0;
 		g_snprintf(audio_codecs, str_len, "%s", janus_audiocodec_name(videoroom->acodec[0]));
 		if (videoroom->acodec[1] != JANUS_AUDIOCODEC_NONE) {
-			g_strlcat(audio_codecs, split, str_len);
-			g_strlcat(audio_codecs, janus_audiocodec_name(videoroom->acodec[1]), str_len);
+			janus_strlcat(audio_codecs, split, str_len);
+			janus_strlcat(audio_codecs, janus_audiocodec_name(videoroom->acodec[1]), str_len);
 		}
 		if (videoroom->acodec[2] != JANUS_AUDIOCODEC_NONE) {
-			g_strlcat(audio_codecs, split, str_len);
-			g_strlcat(audio_codecs, janus_audiocodec_name(videoroom->acodec[2]), str_len);
+			janus_strlcat(audio_codecs, split, str_len);
+			janus_strlcat(audio_codecs, janus_audiocodec_name(videoroom->acodec[2]), str_len);
 		}
 		if (videoroom->acodec[3] != JANUS_AUDIOCODEC_NONE) {
-			g_strlcat(audio_codecs, split, str_len);
-			g_strlcat(audio_codecs, janus_audiocodec_name(videoroom->acodec[3]), str_len);
+			janus_strlcat(audio_codecs, split, str_len);
+			janus_strlcat(audio_codecs, janus_audiocodec_name(videoroom->acodec[3]), str_len);
 		}
 		if (videoroom->acodec[4] != JANUS_AUDIOCODEC_NONE) {
-			g_strlcat(audio_codecs, split, str_len);
-			g_strlcat(audio_codecs, janus_audiocodec_name(videoroom->acodec[4]), str_len);
+			janus_strlcat(audio_codecs, split, str_len);
+			janus_strlcat(audio_codecs, janus_audiocodec_name(videoroom->acodec[4]), str_len);
 		}
 	}
 	if (video_codecs) {
 		video_codecs[0] = 0;
 		g_snprintf(video_codecs, str_len, "%s", janus_videocodec_name(videoroom->vcodec[0]));
 		if (videoroom->vcodec[1] != JANUS_VIDEOCODEC_NONE) {
-			g_strlcat(video_codecs, split, str_len);
-			g_strlcat(video_codecs, janus_videocodec_name(videoroom->vcodec[1]), str_len);
+			janus_strlcat(video_codecs, split, str_len);
+			janus_strlcat(video_codecs, janus_videocodec_name(videoroom->vcodec[1]), str_len);
 		}
 		if (videoroom->vcodec[2] != JANUS_VIDEOCODEC_NONE) {
-			g_strlcat(video_codecs, split, str_len);
-			g_strlcat(video_codecs, janus_videocodec_name(videoroom->vcodec[2]), str_len);
+			janus_strlcat(video_codecs, split, str_len);
+			janus_strlcat(video_codecs, janus_videocodec_name(videoroom->vcodec[2]), str_len);
 		}
 		if (videoroom->vcodec[3] != JANUS_VIDEOCODEC_NONE) {
-			g_strlcat(video_codecs, split, str_len);
-			g_strlcat(video_codecs, janus_videocodec_name(videoroom->vcodec[3]), str_len);
+			janus_strlcat(video_codecs, split, str_len);
+			janus_strlcat(video_codecs, janus_videocodec_name(videoroom->vcodec[3]), str_len);
 		}
 		if (videoroom->vcodec[4] != JANUS_VIDEOCODEC_NONE) {
-			g_strlcat(video_codecs, split, str_len);
-			g_strlcat(video_codecs, janus_videocodec_name(videoroom->vcodec[4]), str_len);
+			janus_strlcat(video_codecs, split, str_len);
+			janus_strlcat(video_codecs, janus_videocodec_name(videoroom->vcodec[4]), str_len);
 		}
 	}
 }
@@ -1944,7 +1967,7 @@ static guint32 janus_videoroom_rtp_forwarder_add_helper(janus_videoroom_publishe
 			janus_mutex_unlock(&p->rtp_forwarders_mutex);
 			janus_refcount_decrease(&p->ref);
 			JANUS_LOG(LOG_ERR, "Error creating RTCP socket for new RTP forwarder... %d (%s)\n",
-				errno, strerror(errno));
+				errno, g_strerror(errno));
 			return 0;
 		}
 		int v6only = 0;
@@ -1952,7 +1975,7 @@ static guint32 janus_videoroom_rtp_forwarder_add_helper(janus_videoroom_publishe
 			janus_mutex_unlock(&p->rtp_forwarders_mutex);
 			janus_refcount_decrease(&p->ref);
 			JANUS_LOG(LOG_ERR, "Error creating RTCP socket for new RTP forwarder... %d (%s)\n",
-				errno, strerror(errno));
+				errno, g_strerror(errno));
 			close(fd);
 			return 0;
 		}
@@ -1967,7 +1990,7 @@ static guint32 janus_videoroom_rtp_forwarder_add_helper(janus_videoroom_publishe
 			janus_mutex_unlock(&p->rtp_forwarders_mutex);
 			janus_refcount_decrease(&p->ref);
 			JANUS_LOG(LOG_ERR, "Error binding RTCP socket for new RTP forwarder... %d (%s)\n",
-				errno, strerror(errno));
+				errno, g_strerror(errno));
 			close(fd);
 			return 0;
 		}
@@ -2236,6 +2259,7 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
 			janus_config_item *vp9profile = janus_config_get(config, cat, janus_config_type_item, "vp9_profile");
 			janus_config_item *h264profile = janus_config_get(config, cat, janus_config_type_item, "h264_profile");
 			janus_config_item *fec = janus_config_get(config, cat, janus_config_type_item, "opus_fec");
+			janus_config_item *dtx = janus_config_get(config, cat, janus_config_type_item, "opus_dtx");
 			janus_config_item *svc = janus_config_get(config, cat, janus_config_type_item, "video_svc");
 			janus_config_item *audiolevel_ext = janus_config_get(config, cat, janus_config_type_item, "audiolevel_ext");
 			janus_config_item *audiolevel_event = janus_config_get(config, cat, janus_config_type_item, "audiolevel_event");
@@ -2321,7 +2345,7 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
 			videoroom->acodec[4] = JANUS_AUDIOCODEC_NONE;
 			/* Check if we're forcing a different single codec, or allowing more than one */
 			if(audiocodec && audiocodec->value) {
-				gchar **list = g_strsplit(audiocodec->value, ",", 4);
+				gchar **list = g_strsplit(audiocodec->value, ",", 6);
 				gchar *codec = list[0];
 				if(codec != NULL) {
 					int i=0;
@@ -2346,7 +2370,7 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
 			videoroom->vcodec[4] = JANUS_VIDEOCODEC_NONE;
 			/* Check if we're forcing a different single codec, or allowing more than one */
 			if(videocodec && videocodec->value) {
-				gchar **list = g_strsplit(videocodec->value, ",", 4);
+				gchar **list = g_strsplit(videocodec->value, ",", 6);
 				gchar *codec = list[0];
 				if(codec != NULL) {
 					int i=0;
@@ -2377,6 +2401,7 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
 					videoroom->vcodec[4] == JANUS_VIDEOCODEC_H264)) {
 				videoroom->h264_profile = g_strdup(h264profile->value);
 			}
+			videoroom->do_opusfec = TRUE;
 			if(fec && fec->value) {
 				videoroom->do_opusfec = janus_is_true(fec->value);
 				if(videoroom->acodec[0] != JANUS_AUDIOCODEC_OPUS &&
@@ -2386,6 +2411,17 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
 						videoroom->acodec[4] != JANUS_AUDIOCODEC_OPUS) {
 					videoroom->do_opusfec = FALSE;
 					JANUS_LOG(LOG_WARN, "Inband FEC is only supported for rooms that allow Opus: disabling it...\n");
+				}
+			}
+			if(dtx && dtx->value) {
+				videoroom->do_opusdtx = janus_is_true(dtx->value);
+				if(videoroom->acodec[0] != JANUS_AUDIOCODEC_OPUS &&
+						videoroom->acodec[1] != JANUS_AUDIOCODEC_OPUS &&
+						videoroom->acodec[2] != JANUS_AUDIOCODEC_OPUS &&
+						videoroom->acodec[3] != JANUS_AUDIOCODEC_OPUS &&
+						videoroom->acodec[4] != JANUS_AUDIOCODEC_OPUS) {
+					videoroom->do_opusdtx = FALSE;
+					JANUS_LOG(LOG_WARN, "DTX is only supported for rooms that allow Opus: disabling it...\n");
 				}
 			}
 			if(svc && svc->value && janus_is_true(svc->value)) {
@@ -2644,6 +2680,24 @@ static janus_videoroom_publisher *janus_videoroom_session_get_publisher_nodebug(
 	return publisher;
 }
 
+static janus_videoroom_subscriber *janus_videoroom_session_get_subscriber(janus_videoroom_session *session) {
+	janus_mutex_lock(&session->mutex);
+	janus_videoroom_subscriber *subscriber = (janus_videoroom_subscriber *)session->participant;
+	if(subscriber)
+		janus_refcount_increase(&subscriber->ref);
+	janus_mutex_unlock(&session->mutex);
+	return subscriber;
+}
+
+static janus_videoroom_subscriber *janus_videoroom_session_get_subscriber_nodebug(janus_videoroom_session *session) {
+	janus_mutex_lock(&session->mutex);
+	janus_videoroom_subscriber *subscriber = (janus_videoroom_subscriber *)session->participant;
+	if(subscriber)
+		janus_refcount_increase_nodebug(&subscriber->ref);
+	janus_mutex_unlock(&session->mutex);
+	return subscriber;
+}
+
 static void janus_videoroom_notify_participants(janus_videoroom_publisher *participant, json_t *msg, gboolean notify_source_participant) {
 	/* participant->room->mutex has to be locked. */
 	if(participant->room == NULL)
@@ -2653,7 +2707,7 @@ static void janus_videoroom_notify_participants(janus_videoroom_publisher *parti
 	g_hash_table_iter_init(&iter, participant->room->participants);
 	while (participant->room && !g_atomic_int_get(&participant->room->destroyed) && g_hash_table_iter_next(&iter, NULL, &value)) {
 		janus_videoroom_publisher *p = value;
-		if(p && p->session && (p != participant || notify_source_participant)) {
+		if(p && !g_atomic_int_get(&p->destroyed) && p->session && (p != participant || notify_source_participant)) {
 			JANUS_LOG(LOG_VERB, "Notifying participant %s (%s)\n", p->user_id_str, p->display ? p->display : "??");
 			int ret = gateway->push_event(p->session->handle, &janus_videoroom_plugin, NULL, msg, NULL);
 			JANUS_LOG(LOG_VERB, "  >> %d (%s)\n", ret, janus_get_api_error(ret));
@@ -2691,11 +2745,13 @@ static void janus_videoroom_leave_or_unpublish(janus_videoroom_publisher *partic
 		janus_mutex_unlock(&rooms_mutex);
 		return;
 	}
-	janus_mutex_unlock(&rooms_mutex);
 	janus_videoroom *room = participant->room;
-	if(!room || g_atomic_int_get(&room->destroyed))
+	if(!room || g_atomic_int_get(&room->destroyed)) {
+		janus_mutex_unlock(&rooms_mutex);
 		return;
+	}
 	janus_refcount_increase(&room->ref);
+	janus_mutex_unlock(&rooms_mutex);
 	janus_mutex_lock(&room->mutex);
 	if (!participant->room) {
 		janus_mutex_unlock(&room->mutex);
@@ -2765,13 +2821,19 @@ void janus_videoroom_destroy_session(janus_plugin_session *handle, int *error) {
 		if(p)
 			janus_refcount_decrease(&p->ref);
 	} else if(session->participant_type == janus_videoroom_p_type_subscriber) {
+		janus_mutex_lock(&session->mutex);
 		janus_videoroom_subscriber *s = (janus_videoroom_subscriber *)session->participant;
+		if(s)
+			janus_refcount_increase(&s->ref);
 		session->participant = NULL;
-		if(s->room) {
+		janus_mutex_unlock(&session->mutex);
+		if(s && s->room) {
 			janus_refcount_decrease(&s->room->ref);
 			janus_refcount_decrease(&s->ref);
 		}
 		janus_videoroom_subscriber_destroy(s);
+		if(s)
+			janus_refcount_decrease(&s->ref);
 	}
 	janus_refcount_decrease(&session->ref);
 	return;
@@ -2836,11 +2898,12 @@ json_t *janus_videoroom_query_session(janus_plugin_session *handle) {
 				}
 				if(participant->e2ee)
 					json_object_set_new(info, "e2ee", json_true());
-				janus_refcount_decrease(&participant->ref);
 			}
+			if(participant != NULL)
+				janus_refcount_decrease(&participant->ref);
 		} else if(session->participant_type == janus_videoroom_p_type_subscriber) {
 			json_object_set_new(info, "type", json_string("subscriber"));
-			janus_videoroom_subscriber *participant = (janus_videoroom_subscriber *)session->participant;
+			janus_videoroom_subscriber *participant = janus_videoroom_session_get_subscriber(session);
 			if(participant && participant->room) {
 				janus_videoroom_publisher *feed = (janus_videoroom_publisher *)participant->feed;
 				if(feed && feed->room) {
@@ -2881,6 +2944,8 @@ json_t *janus_videoroom_query_session(janus_plugin_session *handle) {
 				if(participant->e2ee)
 					json_object_set_new(info, "e2ee", json_true());
 			}
+			if(participant)
+				janus_refcount_decrease(&participant->ref);
 		}
 	}
 	json_object_set_new(info, "hangingup", json_integer(g_atomic_int_get(&session->hangingup)));
@@ -3003,7 +3068,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		json_t *audiocodec = json_object_get(root, "audiocodec");
 		if(audiocodec) {
 			const char *audiocodec_value = json_string_value(audiocodec);
-			gchar **list = g_strsplit(audiocodec_value, ",", 4);
+			gchar **list = g_strsplit(audiocodec_value, ",", 6);
 			gchar *codec = list[0];
 			if(codec != NULL) {
 				int i=0;
@@ -3026,7 +3091,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		json_t *videocodec = json_object_get(root, "videocodec");
 		if(videocodec) {
 			const char *videocodec_value = json_string_value(videocodec);
-			gchar **list = g_strsplit(videocodec_value, ",", 4);
+			gchar **list = g_strsplit(videocodec_value, ",", 6);
 			gchar *codec = list[0];
 			if(codec != NULL) {
 				int i=0;
@@ -3049,6 +3114,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		json_t *vp9profile = json_object_get(root, "vp9_profile");
 		json_t *h264profile = json_object_get(root, "h264_profile");
 		json_t *fec = json_object_get(root, "opus_fec");
+		json_t *dtx = json_object_get(root, "opus_dtx");
 		json_t *svc = json_object_get(root, "video_svc");
 		json_t *audiolevel_ext = json_object_get(root, "audiolevel_ext");
 		json_t *audiolevel_event = json_object_get(root, "audiolevel_event");
@@ -3181,7 +3247,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		/* Check if we're forcing a different single codec, or allowing more than one */
 		if(audiocodec) {
 			const char *audiocodec_value = json_string_value(audiocodec);
-			gchar **list = g_strsplit(audiocodec_value, ",", 4);
+			gchar **list = g_strsplit(audiocodec_value, ",", 6);
 			gchar *codec = list[0];
 			if(codec != NULL) {
 				int i=0;
@@ -3207,7 +3273,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		/* Check if we're forcing a different single codec, or allowing more than one */
 		if(videocodec) {
 			const char *videocodec_value = json_string_value(videocodec);
-			gchar **list = g_strsplit(videocodec_value, ",", 4);
+			gchar **list = g_strsplit(videocodec_value, ",", 6);
 			gchar *codec = list[0];
 			if(codec != NULL) {
 				int i=0;
@@ -3240,6 +3306,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 				videoroom->vcodec[4] == JANUS_VIDEOCODEC_H264)) {
 			videoroom->h264_profile = g_strdup(h264_profile);
 		}
+		videoroom->do_opusfec = TRUE;
 		if(fec) {
 			videoroom->do_opusfec = json_is_true(fec);
 			if(videoroom->acodec[0] != JANUS_AUDIOCODEC_OPUS &&
@@ -3249,6 +3316,17 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 					videoroom->acodec[4] != JANUS_AUDIOCODEC_OPUS) {
 				videoroom->do_opusfec = FALSE;
 				JANUS_LOG(LOG_WARN, "Inband FEC is only supported for rooms that allow Opus: disabling it...\n");
+			}
+		}
+		if(dtx) {
+			videoroom->do_opusdtx = json_is_true(dtx);
+			if(videoroom->acodec[0] != JANUS_AUDIOCODEC_OPUS &&
+					videoroom->acodec[1] != JANUS_AUDIOCODEC_OPUS &&
+					videoroom->acodec[2] != JANUS_AUDIOCODEC_OPUS &&
+					videoroom->acodec[3] != JANUS_AUDIOCODEC_OPUS &&
+					videoroom->acodec[4] != JANUS_AUDIOCODEC_OPUS) {
+				videoroom->do_opusdtx = FALSE;
+				JANUS_LOG(LOG_WARN, "DTX is only supported for rooms that allow Opus: disabling it...\n");
 			}
 		}
 		if(svc && json_is_true(svc)) {
@@ -3366,6 +3444,8 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 				janus_config_add(config, c, janus_config_item_create("h264_profile", videoroom->h264_profile));
 			if(videoroom->do_opusfec)
 				janus_config_add(config, c, janus_config_item_create("opus_fec", "yes"));
+			if(videoroom->do_opusdtx)
+				janus_config_add(config, c, janus_config_item_create("opus_dtx", "yes"));
 			if(videoroom->do_svc)
 				janus_config_add(config, c, janus_config_item_create("video_svc", "yes"));
 			if(videoroom->room_secret)
@@ -3548,6 +3628,8 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 				janus_config_add(config, c, janus_config_item_create("h264_profile", videoroom->h264_profile));
 			if(videoroom->do_opusfec)
 				janus_config_add(config, c, janus_config_item_create("opus_fec", "yes"));
+			if(videoroom->do_opusdtx)
+				janus_config_add(config, c, janus_config_item_create("opus_dtx", "yes"));
 			if(videoroom->do_svc)
 				janus_config_add(config, c, janus_config_item_create("video_svc", "yes"));
 			if(videoroom->room_secret)
@@ -3656,7 +3738,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		g_hash_table_iter_init(&iter, videoroom->participants);
 		while (g_hash_table_iter_next(&iter, NULL, &value)) {
 			janus_videoroom_publisher *p = value;
-			if(p && p->session && p->room) {
+			if(p && !g_atomic_int_get(&p->destroyed) && p->session && p->room) {
 				g_clear_pointer(&p->room, janus_videoroom_room_dereference);
 				/* Notify the user we're going to destroy the room... */
 				int ret = gateway->push_event(p->session->handle, &janus_videoroom_plugin, NULL, destroyed, NULL);
@@ -3734,6 +3816,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 				json_object_set_new(rl, "room", string_ids ? json_string(room->room_id_str) : json_integer(room->room_id));
 				json_object_set_new(rl, "description", json_string(room->room_name));
 				json_object_set_new(rl, "pin_required", room->room_pin ? json_true() : json_false());
+				json_object_set_new(rl, "is_private", room->is_private ? json_true() : json_false());
 				json_object_set_new(rl, "max_publishers", json_integer(room->max_publishers));
 				json_object_set_new(rl, "bitrate", json_integer(room->bitrate));
 				if(room->bitrate_cap)
@@ -3749,12 +3832,13 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 				json_object_set_new(rl, "videocodec", json_string(video_codecs));
 				if(room->do_opusfec)
 					json_object_set_new(rl, "opus_fec", json_true());
+				if(room->do_opusdtx)
+					json_object_set_new(rl, "opus_dtx", json_true());
 				if(room->do_svc)
 					json_object_set_new(rl, "video_svc", json_true());
 				json_object_set_new(rl, "record", room->record ? json_true() : json_false());
 				json_object_set_new(rl, "rec_dir", json_string(room->rec_dir));
 				json_object_set_new(rl, "lock_record", room->lock_record ? json_true() : json_false());
-				/* TODO: Should we list participants as well? or should there be a separate API call on a specific room for this? */
 				json_object_set_new(rl, "num_participants", json_integer(g_hash_table_size(room->participants)));
 				json_object_set_new(rl, "audiolevel_ext", room->audiolevel_ext ? json_true() : json_false());
 				json_object_set_new(rl, "audiolevel_event", room->audiolevel_event ? json_true() : json_false());
@@ -3967,10 +4051,12 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		janus_mutex_lock(&rooms_mutex);
 		janus_videoroom *videoroom = NULL;
 		error_code = janus_videoroom_access_room(root, TRUE, FALSE, &videoroom, error_cause, sizeof(error_cause));
-		janus_mutex_unlock(&rooms_mutex);
-		if(error_code != 0)
+		if(error_code != 0) {
+			janus_mutex_unlock(&rooms_mutex);
 			goto prepare_response;
+		}
 		janus_refcount_increase(&videoroom->ref);
+		janus_mutex_unlock(&rooms_mutex);
 		janus_mutex_lock(&videoroom->mutex);
 		janus_videoroom_publisher *publisher = g_hash_table_lookup(videoroom->participants,
 			string_ids ? (gpointer)publisher_id_str : (gpointer)&publisher_id);
@@ -4193,11 +4279,13 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		janus_mutex_lock(&rooms_mutex);
 		janus_videoroom *videoroom = NULL;
 		error_code = janus_videoroom_access_room(root, TRUE, FALSE, &videoroom, error_cause, sizeof(error_cause));
-		janus_mutex_unlock(&rooms_mutex);
-		if(error_code != 0)
+		if(error_code != 0) {
+			janus_mutex_unlock(&rooms_mutex);
 			goto prepare_response;
-		janus_mutex_lock(&videoroom->mutex);
+		}
 		janus_refcount_increase(&videoroom->ref);
+		janus_mutex_unlock(&rooms_mutex);
+		janus_mutex_lock(&videoroom->mutex);
 		janus_videoroom_publisher *publisher = g_hash_table_lookup(videoroom->participants,
 			string_ids ? (gpointer)publisher_id_str : (gpointer)&publisher_id);
 		if(publisher == NULL) {
@@ -4512,7 +4600,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		/* This publisher is leaving, tell everybody */
 		janus_videoroom_leave_or_unpublish(participant, TRUE, TRUE);
 		/* Tell the core to tear down the PeerConnection, hangup_media will do the rest */
-		if(participant && participant->session)
+		if(participant && !g_atomic_int_get(&participant->destroyed) && participant->session)
 			gateway->close_pc(participant->session->handle);
 		JANUS_LOG(LOG_INFO, "Kicked user %s from room %s\n", user_id_str, room_id_str);
 		/* Prepare response */
@@ -4703,10 +4791,12 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		janus_mutex_lock(&rooms_mutex);
 		janus_videoroom *videoroom = NULL;
 		error_code = janus_videoroom_access_room(root, FALSE, FALSE, &videoroom, error_cause, sizeof(error_cause));
-		janus_mutex_unlock(&rooms_mutex);
-		if(error_code != 0)
+		if(error_code != 0) {
+			janus_mutex_unlock(&rooms_mutex);
 			goto prepare_response;
+		}
 		janus_refcount_increase(&videoroom->ref);
+		janus_mutex_unlock(&rooms_mutex);
 		/* Return a list of all participants (whether they're publishing or not) */
 		json_t *list = json_array();
 		GHashTableIter iter;
@@ -4759,9 +4849,12 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		janus_mutex_lock(&rooms_mutex);
 		janus_videoroom *videoroom = NULL;
 		error_code = janus_videoroom_access_room(root, TRUE, FALSE, &videoroom, error_cause, sizeof(error_cause));
-		janus_mutex_unlock(&rooms_mutex);
-		if(error_code != 0)
+		if(error_code != 0) {
+			janus_mutex_unlock(&rooms_mutex);
 			goto prepare_response;
+		}
+		janus_refcount_increase(&videoroom->ref);
+		janus_mutex_unlock(&rooms_mutex);
 		/* Return a list of all forwarders */
 		json_t *list = json_array();
 		GHashTableIter iter;
@@ -4832,6 +4925,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 			json_array_append_new(list, pl);
 		}
 		janus_mutex_unlock(&videoroom->mutex);
+		janus_refcount_decrease(&videoroom->ref);
 		response = json_object();
 		json_object_set_new(response, "videoroom", json_string("forwarders"));
 		json_object_set_new(response, "room", string_ids ? json_string(room_id_str) : json_integer(room_id));
@@ -4849,14 +4943,15 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		/* Lookup room */
 		janus_mutex_lock(&rooms_mutex);
 		janus_videoroom *videoroom = NULL;
-		error_code = janus_videoroom_access_room(root, FALSE, TRUE, &videoroom, error_cause, sizeof(error_cause));
+		error_code = janus_videoroom_access_room(root, TRUE, FALSE, &videoroom, error_cause, sizeof(error_cause));
 		if(error_code != 0) {
 			JANUS_LOG(LOG_ERR, "Failed to access videoroom\n");
 			janus_mutex_unlock(&rooms_mutex);
 			goto prepare_response;
 		}
-		janus_mutex_lock(&videoroom->mutex);
+		janus_refcount_increase(&videoroom->ref);
 		janus_mutex_unlock(&rooms_mutex);
+		janus_mutex_lock(&videoroom->mutex);
 		/* Set recording status */
 		gboolean room_prev_recording_active = recording_active;
 		if (room_prev_recording_active != videoroom->record) {
@@ -4896,6 +4991,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 			}
         }
 		janus_mutex_unlock(&videoroom->mutex);
+		janus_refcount_decrease(&videoroom->ref);
 		response = json_object();
 		json_object_set_new(response, "videoroom", json_string("success"));
 		json_object_set_new(response, "record", json_boolean(recording_active));
@@ -5098,6 +5194,12 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 				json_object_set_new(pl, "audio_codec", json_string(janus_audiocodec_name(participant->acodec)));
 			if(participant->video)
 				json_object_set_new(pl, "video_codec", json_string(janus_videocodec_name(participant->vcodec)));
+			if(participant->audio_muted)
+				json_object_set_new(pl, "audio_moderated", json_true());
+			if(participant->video_muted)
+				json_object_set_new(pl, "video_moderated", json_true());
+			if(participant->data_muted)
+				json_object_set_new(pl, "data_moderated", json_true());
 			if(participant->ssrc[0] || participant->rid[0])
 				json_object_set_new(pl, "simulcast", json_true());
 			if(participant->audio_level_extmap_id > 0)
@@ -5107,10 +5209,13 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 			json_object_set_new(pub, "videoroom", json_string("event"));
 			json_object_set_new(pub, "room", string_ids ? json_string(participant->room_id_str) : json_integer(participant->room_id));
 			json_object_set_new(pub, "publishers", list);
-			if (participant->room) {
-				janus_mutex_lock(&participant->room->mutex);
+			janus_videoroom *room = participant->room;
+			if(room && !g_atomic_int_get(&room->destroyed)) {
+				janus_refcount_increase(&room->ref);
+				janus_mutex_lock(&room->mutex);
 				janus_videoroom_notify_participants(participant, pub, FALSE);
-				janus_mutex_unlock(&participant->room->mutex);
+				janus_mutex_unlock(&room->mutex);
+				janus_refcount_decrease(&room->ref);
 			}
 			json_decref(pub);
 			/* Also notify event handlers */
@@ -5125,7 +5230,7 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 			}
 			janus_refcount_decrease(&participant->ref);
 		} else if(session->participant_type == janus_videoroom_p_type_subscriber) {
-			janus_videoroom_subscriber *s = (janus_videoroom_subscriber *)session->participant;
+			janus_videoroom_subscriber *s = janus_videoroom_session_get_subscriber(session);
 			if(s && s->feed) {
 				janus_videoroom_publisher *p = s->feed;
 				if(p && p->session) {
@@ -5140,6 +5245,8 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 					}
 				}
 			}
+			if(s)
+				janus_refcount_decrease(&s->ref);
 		}
 	}
 	janus_refcount_decrease(&session->ref);
@@ -5291,7 +5398,7 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 				size_t addrlen = (rtp_forward->serv_addr.sin_family == AF_INET ? sizeof(rtp_forward->serv_addr) : sizeof(rtp_forward->serv_addr6));
 				if(sendto(participant->udp_sock, buf, len, 0, address, addrlen) < 0) {
 					JANUS_LOG(LOG_HUGE, "Error forwarding RTP %s packet for %s... %s (len=%d)...\n",
-						(video ? "video" : "audio"), participant->display, strerror(errno), len);
+						(video ? "video" : "audio"), participant->display, g_strerror(errno), len);
 				}
 			} else {
 				/* SRTP: check if we already encrypted the packet before */
@@ -5315,7 +5422,7 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 					size_t addrlen = (rtp_forward->serv_addr.sin_family == AF_INET ? sizeof(rtp_forward->serv_addr) : sizeof(rtp_forward->serv_addr6));
 					if(sendto(participant->udp_sock, rtp_forward->srtp_ctx->sbuf, rtp_forward->srtp_ctx->slen, 0, address, addrlen) < 0) {
 						JANUS_LOG(LOG_HUGE, "Error forwarding SRTP %s packet for %s... %s (len=%d)...\n",
-							(video ? "video" : "audio"), participant->display, strerror(errno), rtp_forward->srtp_ctx->slen);
+							(video ? "video" : "audio"), participant->display, g_strerror(errno), rtp_forward->srtp_ctx->slen);
 					}
 				}
 			}
@@ -5361,8 +5468,10 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 			/* We're doing SVC: let's parse this packet to see which layers are there */
 			int plen = 0;
 			char *payload = janus_rtp_payload(buf, len, &plen);
-			if(payload == NULL)
+			if(payload == NULL) {
+				janus_videoroom_publisher_dereference_nodebug(participant);
 				return;
+			}
 			gboolean found = FALSE;
 			memset(&packet.svc_info, 0, sizeof(packet.svc_info));
 			if(janus_vp9_parse_svc(payload, plen, &found, &packet.svc_info) == 0) {
@@ -5411,8 +5520,10 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 				/* First check if this is a keyframe, though: if so, we reset the timer */
 				int plen = 0;
 				char *payload = janus_rtp_payload(buf, len, &plen);
-				if(payload == NULL)
+				if(payload == NULL) {
+					janus_videoroom_publisher_dereference_nodebug(participant);
 					return;
+				}
 				if(participant->vcodec == JANUS_VIDEOCODEC_VP8) {
 					if(janus_vp8_is_keyframe(payload, plen))
 						participant->fir_latest = now;
@@ -5453,11 +5564,13 @@ void janus_videoroom_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rt
 	uint16_t len = packet->length;
 	if(session->participant_type == janus_videoroom_p_type_subscriber) {
 		/* A subscriber sent some RTCP, check what it is and if we need to forward it to the publisher */
-		janus_videoroom_subscriber *s = (janus_videoroom_subscriber *)session->participant;
-		if(s == NULL || g_atomic_int_get(&s->destroyed))
+		janus_videoroom_subscriber *s = janus_videoroom_session_get_subscriber_nodebug(session);
+		if(s == NULL)
 			return;
-		if(!s->video)
+		if(g_atomic_int_get(&s->destroyed) || !s->video) {
+			janus_refcount_decrease_nodebug(&s->ref);
 			return;	/* The only feedback we handle is video related anyway... */
+		}
 		if(janus_rtcp_has_fir(buf, len) || janus_rtcp_has_pli(buf, len)) {
 			/* We got a FIR or PLI, forward a PLI it to the publisher */
 			if(s->feed) {
@@ -5471,6 +5584,7 @@ void janus_videoroom_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rt
 		if(bitrate > 0) {
 			/* FIXME We got a REMB from this subscriber, should we do something about it? */
 		}
+		janus_refcount_decrease_nodebug(&s->ref);
 	}
 }
 
@@ -5505,7 +5619,7 @@ void janus_videoroom_incoming_data(janus_plugin_session *handle, janus_plugin_da
 			size_t addrlen = (rtp_forward->serv_addr.sin_family == AF_INET ? sizeof(rtp_forward->serv_addr) : sizeof(rtp_forward->serv_addr6));
 			if(sendto(participant->udp_sock, buf, len, 0, address, addrlen) < 0) {
 				JANUS_LOG(LOG_HUGE, "Error forwarding data packet for %s... %s (len=%d)...\n",
-					participant->display, strerror(errno), len);
+					participant->display, g_strerror(errno), len);
 			}
 		}
 	}
@@ -5555,9 +5669,13 @@ void janus_videoroom_slow_link(janus_plugin_session *handle, int uplink, int vid
 	if(session->participant_type == janus_videoroom_p_type_publisher) {
 		if(!uplink) {
 			janus_videoroom_publisher *publisher = janus_videoroom_session_get_publisher(session);
-			if(publisher == NULL || g_atomic_int_get(&publisher->destroyed)) {
+			if(publisher == NULL) {
 				janus_refcount_decrease(&session->ref);
+				return;
+			}
+			if(g_atomic_int_get(&publisher->destroyed)) {
 				janus_refcount_decrease(&publisher->ref);
+				janus_refcount_decrease(&session->ref);
 				return;
 			}
 			/* Send an event on the handle to notify the application: it's
@@ -5575,8 +5693,13 @@ void janus_videoroom_slow_link(janus_plugin_session *handle, int uplink, int vid
 		}
 	} else if(session->participant_type == janus_videoroom_p_type_subscriber) {
 		if(uplink) {
-			janus_videoroom_subscriber *viewer = (janus_videoroom_subscriber *)session->participant;
-			if(viewer == NULL || g_atomic_int_get(&viewer->destroyed)) {
+			janus_videoroom_subscriber *subscriber = janus_videoroom_session_get_subscriber(session);
+			if(subscriber == NULL) {
+				janus_refcount_decrease(&session->ref);
+				return;
+			}
+			if(g_atomic_int_get(&subscriber->destroyed)) {
+				janus_refcount_decrease(&subscriber->ref);
 				janus_refcount_decrease(&session->ref);
 				return;
 			}
@@ -5741,9 +5864,10 @@ static void janus_videoroom_hangup_subscriber(janus_videoroom_subscriber *s) {
 		}
 		janus_mutex_unlock(&room->mutex);
 	}
-	/* TODO: are we sure this is okay as other handlers use feed directly without synchronization */
+	janus_mutex_lock(&s->session->mutex);
 	if(s->feed)
 		g_clear_pointer(&s->feed, janus_videoroom_publisher_dereference_by_subscriber);
+	janus_mutex_unlock(&s->session->mutex);
 	/* Only "leave" the room if we're closing the PeerConnection at this point */
 	if(s->close_pc) {
 		if(s->room)
@@ -5818,14 +5942,19 @@ static void janus_videoroom_hangup_media_internal(gpointer session_data) {
 		janus_refcount_decrease(&participant->ref);
 	} else if(session->participant_type == janus_videoroom_p_type_subscriber) {
 		/* Get rid of subscriber */
-		janus_videoroom_subscriber *subscriber = (janus_videoroom_subscriber *)session->participant;
+		janus_videoroom_subscriber *subscriber = janus_videoroom_session_get_subscriber(session);
 		if(subscriber) {
 			subscriber->paused = TRUE;
+			janus_mutex_lock(&session->mutex);
 			janus_videoroom_publisher *publisher = subscriber->feed;
 			/* It is safe to use feed as the only other place sets feed to NULL
 			   is in this function and accessing to this function is synchronized
 			   by sessions_mutex */
-			if(publisher != NULL) {
+			if(publisher == NULL || g_atomic_int_get(&publisher->destroyed)) {
+				janus_mutex_unlock(&session->mutex);
+			} else {
+				janus_refcount_increase(&publisher->ref);
+				janus_mutex_unlock(&session->mutex);
 				/* Also notify event handlers */
 				if(notify_events && gateway->events_is_enabled()) {
 					json_t *info = json_object();
@@ -5838,8 +5967,10 @@ static void janus_videoroom_hangup_media_internal(gpointer session_data) {
 				publisher->subscribers = g_slist_remove(publisher->subscribers, subscriber);
 				janus_videoroom_hangup_subscriber(subscriber);
 				janus_mutex_unlock(&publisher->subscribers_mutex);
+				janus_refcount_decrease(&publisher->ref);
 			}
 			subscriber->e2ee = FALSE;
+			janus_refcount_decrease(&subscriber->ref);
 		}
 		/* TODO Should we close the handle as well? */
 	}
@@ -5878,8 +6009,10 @@ static void *janus_videoroom_handler(void *data) {
 			continue;
 		}
 		if(session->participant_type == janus_videoroom_p_type_subscriber) {
-			subscriber = (janus_videoroom_subscriber *)session->participant;
+			subscriber = janus_videoroom_session_get_subscriber(session);
 			if(subscriber == NULL || g_atomic_int_get(&subscriber->destroyed)) {
+				if(subscriber != NULL)
+					janus_refcount_decrease(&subscriber->ref);
 				janus_mutex_unlock(&sessions_mutex);
 				JANUS_LOG(LOG_ERR, "Invalid subscriber instance\n");
 				error_code = JANUS_VIDEOROOM_ERROR_UNKNOWN_ERROR;
@@ -5887,13 +6020,13 @@ static void *janus_videoroom_handler(void *data) {
 				goto error;
 			}
 			if(subscriber->room == NULL) {
+				janus_refcount_decrease(&subscriber->ref);
 				janus_mutex_unlock(&sessions_mutex);
 				JANUS_LOG(LOG_ERR, "No such room\n");
 				error_code = JANUS_VIDEOROOM_ERROR_NO_SUCH_ROOM;
 				g_snprintf(error_cause, 512, "No such room");
 				goto error;
 			}
-			janus_refcount_increase(&subscriber->ref);
 		}
 		janus_mutex_unlock(&sessions_mutex);
 		/* Handle request */
@@ -6124,7 +6257,6 @@ static void *janus_videoroom_handler(void *data) {
 						publisher->pvt_id = 0;
 					}
 				}
-				g_hash_table_insert(publisher->room->private_ids, GUINT_TO_POINTER(publisher->pvt_id), publisher);
 				g_atomic_int_set(&publisher->destroyed, 0);
 				janus_refcount_init(&publisher->ref, janus_videoroom_publisher_free);
 				/* In case we also wanted to configure */
@@ -6144,6 +6276,8 @@ static void *janus_videoroom_handler(void *data) {
 							acodec != publisher->room->acodec[4])) {
 						JANUS_LOG(LOG_ERR, "Participant asked for audio codec '%s', but it's not allowed (room %s, user %s)\n",
 							json_string_value(audiocodec), publisher->room_id_str, publisher->user_id_str);
+						janus_mutex_unlock(&publisher->room->mutex);
+						janus_refcount_decrease(&publisher->room->ref);
 						janus_refcount_decrease(&publisher->ref);
 						error_code = JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT;
 						g_snprintf(error_cause, 512, "Audio codec unavailable in this room");
@@ -6169,6 +6303,8 @@ static void *janus_videoroom_handler(void *data) {
 							vcodec != publisher->room->vcodec[4])) {
 						JANUS_LOG(LOG_ERR, "Participant asked for video codec '%s', but it's not allowed (room %s, user %s)\n",
 							json_string_value(videocodec), publisher->room_id_str, publisher->user_id_str);
+						janus_mutex_unlock(&publisher->room->mutex);
+						janus_refcount_decrease(&publisher->room->ref);
 						janus_refcount_decrease(&publisher->ref);
 						error_code = JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT;
 						g_snprintf(error_cause, 512, "Video codec unavailable in this room");
@@ -6233,6 +6369,7 @@ static void *janus_videoroom_handler(void *data) {
 				g_hash_table_insert(publisher->room->participants,
 					string_ids ? (gpointer)g_strdup(publisher->user_id_str) : (gpointer)janus_uint64_dup(publisher->user_id),
 					publisher);
+				g_hash_table_insert(publisher->room->private_ids, GUINT_TO_POINTER(publisher->pvt_id), publisher);
 				janus_mutex_unlock(&session->mutex);
 				g_hash_table_iter_init(&iter, publisher->room->participants);
 				while (!g_atomic_int_get(&publisher->room->destroyed) && g_hash_table_iter_next(&iter, NULL, &value)) {
@@ -6256,6 +6393,12 @@ static void *janus_videoroom_handler(void *data) {
 						json_object_set_new(pl, "audio_codec", json_string(janus_audiocodec_name(p->acodec)));
 					if(p->video)
 						json_object_set_new(pl, "video_codec", json_string(janus_videocodec_name(p->vcodec)));
+					if(p->audio_muted)
+						json_object_set_new(pl, "audio_moderated", json_true());
+					if(p->video_muted)
+						json_object_set_new(pl, "video_moderated", json_true());
+					if(p->data_muted)
+						json_object_set_new(pl, "data_moderated", json_true());
 					if(p->ssrc[0] || p->rid[0])
 						json_object_set_new(pl, "simulcast", json_true());
 					if(p->audio_level_extmap_id > 0)
@@ -6287,7 +6430,11 @@ static void *janus_videoroom_handler(void *data) {
 					json_integer(publisher->room->room_id));
 					json_object_set_new(info, "id", string_ids ? json_string(user_id_str) : json_integer(user_id));
 					json_object_set_new(info, "private_id", json_integer(publisher->pvt_id));
-					if(display_text != NULL)
+                    if(publisher->room->check_allowed) {
+                        const char *token = json_string_value(json_object_get(root, "token"));
+                        json_object_set_new(info, "token", json_string(token));
+                    }
+                    if(display_text != NULL)
 						json_object_set_new(info, "display", json_string(display_text));
 					if(publisher->user_audio_active_packets)
 						json_object_set_new(info, "audio_active_packets", json_integer(publisher->user_audio_active_packets));
@@ -6864,9 +7011,16 @@ static void *janus_videoroom_handler(void *data) {
 			} else if(!strcasecmp(request_text, "start")) {
 				/* Start/restart receiving the publisher streams */
 				if(subscriber->paused && msg->jsep == NULL) {
+					janus_videoroom_publisher *feed = subscriber->feed;
+
 					/* This is just resuming a paused stream, reset the RTP sequence numbers */
 					subscriber->context.a_seq_reset = TRUE;
 					subscriber->context.v_seq_reset = TRUE;
+
+					if(feed && feed->session && g_atomic_int_get(&feed->session->started)) {
+						/* Send a FIR */
+						janus_videoroom_reqpli(feed, "Subscriber start");
+					}
 				}
 				subscriber->paused = FALSE;
 				event = json_object();
@@ -6944,10 +7098,12 @@ static void *janus_videoroom_handler(void *data) {
 					/* Check if a simulcasting-related request is involved */
 					if(sc_substream && (publisher->ssrc[0] != 0 || publisher->rid[0] != NULL)) {
 						subscriber->sim_context.substream_target = json_integer_value(sc_substream);
-						JANUS_LOG(LOG_VERB, "Setting video SSRC to let through (simulcast): %"SCNu32" (index %d, was %d)\n",
-							publisher->ssrc[subscriber->sim_context.substream],
-							subscriber->sim_context.substream_target,
-							subscriber->sim_context.substream);
+						if(subscriber->sim_context.substream_target >= 0 && subscriber->sim_context.substream_target <= 2) {
+							JANUS_LOG(LOG_VERB, "Setting video SSRC to let through (simulcast): %"SCNu32" (index %d, was %d)\n",
+								publisher->ssrc[subscriber->sim_context.substream_target],
+								subscriber->sim_context.substream_target,
+								subscriber->sim_context.substream);
+						}
 						if(subscriber->sim_context.substream_target == subscriber->sim_context.substream) {
 							/* No need to do anything, we're already getting the right substream, so notify the user */
 							json_t *event = json_object();
@@ -7236,7 +7392,9 @@ static void *janus_videoroom_handler(void *data) {
 					prev_feed->subscribers = g_slist_remove(prev_feed->subscribers, subscriber);
 					janus_mutex_unlock(&prev_feed->subscribers_mutex);
 					janus_refcount_decrease(&prev_feed->session->ref);
+					janus_mutex_lock(&session->mutex);
 					g_clear_pointer(&subscriber->feed, janus_videoroom_publisher_dereference);
+					janus_mutex_unlock(&session->mutex);
 				}
 				/* Subscribe to the new one */
 				subscriber->audio = audio ? json_is_true(audio) : TRUE;	/* True by default */
@@ -7270,7 +7428,9 @@ static void *janus_videoroom_handler(void *data) {
 				janus_mutex_lock(&publisher->subscribers_mutex);
 				publisher->subscribers = g_slist_append(publisher->subscribers, subscriber);
 				janus_mutex_unlock(&publisher->subscribers_mutex);
+				janus_mutex_lock(&session->mutex);
 				subscriber->feed = publisher;
+				janus_mutex_unlock(&session->mutex);
 				/* Send a FIR to the new publisher */
 				janus_videoroom_reqpli(publisher, "Switching existing subscriber to new publisher");
 				/* Done */
@@ -7421,6 +7581,8 @@ static void *janus_videoroom_handler(void *data) {
 					goto error;
 				}
 				char *audio_fmtp = NULL;
+				char custom_fmtp[256];
+				custom_fmtp[0] = '\0';
 				GList *temp = offer->m_lines;
 				while(temp) {
 					/* Which media are available? */
@@ -7450,8 +7612,29 @@ static void *janus_videoroom_handler(void *data) {
 									if(janus_string_to_uint8(a->value, &participant->playout_delay_extmap_id) < 0)
 										JANUS_LOG(LOG_WARN, "Invalid playout-delay extension ID: %s\n", a->value);
 								} else if(m->type == JANUS_SDP_AUDIO && !strcasecmp(a->name, "fmtp")) {
-									if(strstr(a->value, "useinbandfec=1"))
-										participant->do_opusfec = videoroom->do_opusfec;
+									if(strstr(a->value, "useinbandfec=1") && videoroom->do_opusfec) {
+										participant->do_opusfec = TRUE;
+										if(strlen(custom_fmtp) == 0) {
+											g_snprintf(custom_fmtp, sizeof(custom_fmtp), "useinbandfec=1");
+										} else {
+											g_strlcat(custom_fmtp, ";useinbandfec=1", sizeof(custom_fmtp));
+										}
+									}
+									if(strstr(a->value, "usedtx=1") && videoroom->do_opusdtx) {
+										participant->do_opusdtx = TRUE;
+										if(strlen(custom_fmtp) == 0) {
+											g_snprintf(custom_fmtp, sizeof(custom_fmtp), "usedtx=1");
+										} else {
+											g_strlcat(custom_fmtp, ";usedtx=1", sizeof(custom_fmtp));
+										}
+									}
+									if(strstr(a->value, "stereo=1")) {
+										if(strlen(custom_fmtp) == 0) {
+											g_snprintf(custom_fmtp, sizeof(custom_fmtp), "stereo=1");
+										} else {
+											g_strlcat(custom_fmtp, ";stereo=1", sizeof(custom_fmtp));
+										}
+									}
 									char *tmp = strchr(a->value, ' ');
 									if(tmp && strlen(tmp) > 1) {
 										tmp++;
@@ -7527,7 +7710,7 @@ static void *janus_videoroom_handler(void *data) {
 				janus_sdp *answer = janus_sdp_generate_answer(offer,
 					JANUS_SDP_OA_AUDIO_CODEC, janus_audiocodec_name(participant->acodec),
 					JANUS_SDP_OA_AUDIO_DIRECTION, JANUS_SDP_RECVONLY,
-					JANUS_SDP_OA_AUDIO_FMTP, audio_fmtp ? audio_fmtp : (participant->do_opusfec ? "useinbandfec=1" : NULL),
+					JANUS_SDP_OA_AUDIO_FMTP, audio_fmtp ? audio_fmtp : (strlen(custom_fmtp) > 0 ? custom_fmtp : NULL),
 					JANUS_SDP_OA_VIDEO_CODEC, janus_videocodec_name(participant->vcodec),
 					JANUS_SDP_OA_VP9_PROFILE, vp9_profile,
 					JANUS_SDP_OA_H264_PROFILE, h264_profile,
@@ -7535,7 +7718,6 @@ static void *janus_videoroom_handler(void *data) {
 					JANUS_SDP_OA_ACCEPT_EXTMAP, JANUS_RTP_EXTMAP_MID,
 					JANUS_SDP_OA_ACCEPT_EXTMAP, JANUS_RTP_EXTMAP_RID,
 					JANUS_SDP_OA_ACCEPT_EXTMAP, JANUS_RTP_EXTMAP_REPAIRED_RID,
-					JANUS_SDP_OA_ACCEPT_EXTMAP, JANUS_RTP_EXTMAP_FRAME_MARKING,
 					JANUS_SDP_OA_ACCEPT_EXTMAP, videoroom->audiolevel_ext ? JANUS_RTP_EXTMAP_AUDIO_LEVEL : NULL,
 					JANUS_SDP_OA_ACCEPT_EXTMAP, videoroom->videoorient_ext ? JANUS_RTP_EXTMAP_VIDEO_ORIENTATION : NULL,
 					JANUS_SDP_OA_ACCEPT_EXTMAP, videoroom->playoutdelay_ext ? JANUS_RTP_EXTMAP_PLAYOUT_DELAY : NULL,
@@ -7612,21 +7794,21 @@ static void *janus_videoroom_handler(void *data) {
 						break;
 					mid_ext_id++;
 				}
-				int twcc_ext_id = 1;
-				while(twcc_ext_id < 15) {
-					if(twcc_ext_id != mid_ext_id &&
-							twcc_ext_id != participant->audio_level_extmap_id &&
-							twcc_ext_id != participant->video_orient_extmap_id &&
-							twcc_ext_id != participant->playout_delay_extmap_id)
+				int abs_send_time_ext_id = 1;
+				while(abs_send_time_ext_id < 15) {
+					if(abs_send_time_ext_id != mid_ext_id &&
+							abs_send_time_ext_id != participant->audio_level_extmap_id &&
+							abs_send_time_ext_id != participant->video_orient_extmap_id &&
+							abs_send_time_ext_id != participant->playout_delay_extmap_id)
 						break;
-					twcc_ext_id++;
+					abs_send_time_ext_id++;
 				}
 				offer = janus_sdp_generate_offer(s_name, answer->c_addr,
 					JANUS_SDP_OA_AUDIO, participant->audio,
 					JANUS_SDP_OA_AUDIO_CODEC, janus_audiocodec_name(participant->acodec),
 					JANUS_SDP_OA_AUDIO_PT, janus_audiocodec_pt(participant->acodec),
 					JANUS_SDP_OA_AUDIO_DIRECTION, JANUS_SDP_SENDONLY,
-					JANUS_SDP_OA_AUDIO_FMTP, audio_fmtp ? audio_fmtp : (participant->do_opusfec ? "useinbandfec=1" : NULL),
+					JANUS_SDP_OA_AUDIO_FMTP, audio_fmtp ? audio_fmtp : (strlen(custom_fmtp) > 0 ? custom_fmtp : NULL),
 					JANUS_SDP_OA_AUDIO_EXTENSION, JANUS_RTP_EXTMAP_AUDIO_LEVEL,
 						participant->audio_level_extmap_id > 0 ? participant->audio_level_extmap_id : 0,
 					JANUS_SDP_OA_AUDIO_EXTENSION, JANUS_RTP_EXTMAP_MID, mid_ext_id,
@@ -7640,8 +7822,7 @@ static void *janus_videoroom_handler(void *data) {
 						participant->video_orient_extmap_id > 0 ? participant->video_orient_extmap_id : 0,
 					JANUS_SDP_OA_VIDEO_EXTENSION, JANUS_RTP_EXTMAP_PLAYOUT_DELAY,
 						participant->playout_delay_extmap_id > 0 ? participant->playout_delay_extmap_id : 0,
-					JANUS_SDP_OA_VIDEO_EXTENSION, JANUS_RTP_EXTMAP_TRANSPORT_WIDE_CC,
-						videoroom->transport_wide_cc_ext ? twcc_ext_id : 0,
+					JANUS_SDP_OA_VIDEO_EXTENSION, JANUS_RTP_EXTMAP_ABS_SEND_TIME, abs_send_time_ext_id,
 					JANUS_SDP_OA_DATA, participant->data,
 					JANUS_SDP_OA_DONE);
 				/* Is this room recorded, or are we recording this publisher already? */
@@ -7660,7 +7841,6 @@ static void *janus_videoroom_handler(void *data) {
 						JANUS_LOG(LOG_VERB, "Publisher is going to do simulcasting\n");
 						janus_rtp_simulcasting_prepare(msg_simulcast,
 							&participant->rid_extmap_id,
-							&participant->framemarking_ext_id,
 							participant->ssrc, participant->rid);
 					} else {
 						/* No simulcasting involved */
